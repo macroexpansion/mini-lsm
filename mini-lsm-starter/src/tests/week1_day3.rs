@@ -88,7 +88,6 @@ fn as_bytes(x: &[u8]) -> Bytes {
     Bytes::copy_from_slice(x)
 }
 
-#[ignore]
 #[test]
 fn test_block_iterator() {
     let block = Arc::new(generate_block());
@@ -117,7 +116,6 @@ fn test_block_iterator() {
     }
 }
 
-#[ignore]
 #[test]
 fn test_block_seek_key() {
     let block = Arc::new(generate_block());
