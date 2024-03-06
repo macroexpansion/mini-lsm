@@ -66,7 +66,7 @@ impl BlockBuilder {
         // Encode key length.
         self.data.put_u16(key.len() as u16);
         // Encode key content.
-        self.data.put(&key.raw_ref()[..]);
+        self.data.put(&mut key.raw_ref());
 
         // Encode value length.
         self.data.put_u16(value.len() as u16);
