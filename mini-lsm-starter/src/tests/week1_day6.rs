@@ -117,7 +117,6 @@ fn test_task1_storage_get() {
     assert_eq!(storage.get(b"555").unwrap(), None);
 }
 
-#[ignore]
 #[test]
 fn test_task2_auto_flush() {
     let dir = tempdir().unwrap();
