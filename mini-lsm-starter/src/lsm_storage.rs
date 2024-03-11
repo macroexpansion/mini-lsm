@@ -308,14 +308,20 @@ impl LsmStorageInner {
             }
         }
 
-        let l0_sstable_iters = self.create_l0_sstable_iters(&snapshot, Bound::Included(key))?;
-        let sstable_iter = MergeIterator::create(l0_sstable_iters);
-
-        if sstable_iter.is_valid()
-            && sstable_iter.key().raw_ref() == key
-            && !sstable_iter.value().is_empty()
-        {
-            return Ok(Some(Bytes::copy_from_slice(sstable_iter.value())));
+        for sstable_id in snapshot.l0_sstables.iter() {
+            let sstable = snapshot.sstables.get(sstable_id).unwrap().clone();
+            if key_within(
+                key,
+                sstable.first_key().as_key_slice(),
+                sstable.last_key().as_key_slice(),
+            ) {
+                let iter =
+                    SsTableIterator::create_and_seek_to_key(sstable, KeySlice::from_slice(key))?;
+                if iter.is_valid() && iter.key().raw_ref() == key && !iter.value().is_empty() {
+                    return Ok(Some(Bytes::copy_from_slice(iter.value())));
+                }
+                break;
+            }
         }
 
         Ok(None)
@@ -461,7 +467,7 @@ impl LsmStorageInner {
         let memtable_iters = self.create_membtable_iters(&snapshot, lower, upper)?;
         let memtable_iter = MergeIterator::create(memtable_iters);
 
-        let l0_sstable_iters = self.create_l0_sstable_iters(&snapshot, lower)?;
+        let l0_sstable_iters = self.create_l0_sstable_iters(&snapshot, lower, upper)?;
         let sstable_iter = MergeIterator::create(l0_sstable_iters);
 
         let memtable_sstable_iter = TwoMergeIterator::create(memtable_iter, sstable_iter)?;
@@ -490,30 +496,69 @@ impl LsmStorageInner {
         &self,
         snapshot: &Arc<LsmStorageState>,
         lower: Bound<&[u8]>,
+        upper: Bound<&[u8]>,
     ) -> Result<Vec<Box<SsTableIterator>>> {
         let mut sstable_iters = Vec::with_capacity(snapshot.l0_sstables.len());
 
         for sstable_id in snapshot.l0_sstables.iter() {
             let sstable = snapshot.sstables.get(sstable_id).unwrap().clone();
-            let iter = match lower {
-                Bound::Included(key) => {
-                    SsTableIterator::create_and_seek_to_key(sstable, KeySlice::from_slice(key))?
-                }
-                Bound::Excluded(key) => {
-                    let mut iter = SsTableIterator::create_and_seek_to_key(
-                        sstable,
-                        KeySlice::from_slice(key),
-                    )?;
-                    if iter.is_valid() && iter.key().raw_ref() == key {
-                        iter.next()?;
+            if range_overlap(
+                lower,
+                upper,
+                sstable.first_key().as_key_slice(),
+                sstable.last_key().as_key_slice(),
+            ) {
+                let iter = match lower {
+                    Bound::Included(key) => {
+                        SsTableIterator::create_and_seek_to_key(sstable, KeySlice::from_slice(key))?
                     }
-                    iter
-                }
-                Bound::Unbounded => SsTableIterator::create_and_seek_to_first(sstable)?,
-            };
-            sstable_iters.push(Box::new(iter));
+                    Bound::Excluded(key) => {
+                        let mut iter = SsTableIterator::create_and_seek_to_key(
+                            sstable,
+                            KeySlice::from_slice(key),
+                        )?;
+                        if iter.is_valid() && iter.key().raw_ref() == key {
+                            iter.next()?;
+                        }
+                        iter
+                    }
+                    Bound::Unbounded => SsTableIterator::create_and_seek_to_first(sstable)?,
+                };
+                sstable_iters.push(Box::new(iter));
+            }
         }
 
         Ok(sstable_iters)
     }
+}
+
+fn range_overlap(
+    user_begin: Bound<&[u8]>,
+    user_end: Bound<&[u8]>,
+    table_begin: KeySlice,
+    table_end: KeySlice,
+) -> bool {
+    match user_end {
+        Bound::Excluded(key) if key <= table_begin.raw_ref() => {
+            return false;
+        }
+        Bound::Included(key) if key < table_begin.raw_ref() => {
+            return false;
+        }
+        _ => {}
+    }
+    match user_begin {
+        Bound::Excluded(key) if key >= table_end.raw_ref() => {
+            return false;
+        }
+        Bound::Included(key) if key > table_end.raw_ref() => {
+            return false;
+        }
+        _ => {}
+    }
+    true
+}
+
+fn key_within(user_key: &[u8], table_begin: KeySlice, table_end: KeySlice) -> bool {
+    table_begin.raw_ref() <= user_key && user_key <= table_end.raw_ref()
 }

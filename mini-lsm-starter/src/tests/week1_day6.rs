@@ -136,7 +136,6 @@ fn test_task2_auto_flush() {
     assert!(!storage.inner.state.read().l0_sstables.is_empty());
 }
 
-#[ignore]
 #[test]
 fn test_task3_sst_filter() {
     let dir = tempdir().unwrap();
