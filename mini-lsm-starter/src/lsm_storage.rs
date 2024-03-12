@@ -310,13 +310,11 @@ impl LsmStorageInner {
 
         for sstable_id in snapshot.l0_sstables.iter() {
             let sstable = snapshot.sstables.get(sstable_id).unwrap().clone();
-            if key_within(
-                key,
-                sstable.first_key().as_key_slice(),
-                sstable.last_key().as_key_slice(),
-            ) {
-                let iter =
-                    SsTableIterator::create_and_seek_to_key(sstable, KeySlice::from_slice(key))?;
+            if found_table(key, &sstable) {
+                let iter = SsTableIterator::create_and_seek_to_key(
+                    sstable.clone(),
+                    KeySlice::from_slice(key),
+                )?;
                 if iter.is_valid() && iter.key().raw_ref() == key && !iter.value().is_empty() {
                     return Ok(Some(Bytes::copy_from_slice(iter.value())));
                 }
@@ -561,4 +559,22 @@ fn range_overlap(
 
 fn key_within(user_key: &[u8], table_begin: KeySlice, table_end: KeySlice) -> bool {
     table_begin.raw_ref() <= user_key && user_key <= table_end.raw_ref()
+}
+
+fn found_table(key: &[u8], sstable: &Arc<SsTable>) -> bool {
+    if key_within(
+        key,
+        sstable.first_key().as_key_slice(),
+        sstable.last_key().as_key_slice(),
+    ) {
+        if let Some(bloom) = &sstable.bloom {
+            if bloom.may_contain(farmhash::fingerprint32(key)) {
+                return true;
+            }
+        } else {
+            return true;
+        }
+    }
+
+    false
 }
