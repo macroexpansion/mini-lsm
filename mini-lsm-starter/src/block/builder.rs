@@ -19,19 +19,19 @@ pub struct BlockBuilder {
     first_key: KeyVec,
 }
 
-// fn compute_overlap(first_key: KeySlice, key: KeySlice) -> usize {
-//     let mut i = 0;
-//     loop {
-//         if i >= first_key.len() || i >= key.len() {
-//             break;
-//         }
-//         if first_key.raw_ref()[i] != key.raw_ref()[i] {
-//             break;
-//         }
-//         i += 1;
-//     }
-//     i
-// }
+fn compute_overlap(first_key: KeySlice, key: KeySlice) -> usize {
+    let mut i = 0;
+    loop {
+        if i >= first_key.len() || i >= key.len() {
+            break;
+        }
+        if first_key.raw_ref()[i] != key.raw_ref()[i] {
+            break;
+        }
+        i += 1;
+    }
+    i
+}
 
 impl BlockBuilder {
     /// Creates a new block builder.
@@ -63,10 +63,14 @@ impl BlockBuilder {
         // Add the offset of the data into the offset array.
         self.offsets.push(self.data.len() as u16);
 
-        // Encode key length.
-        self.data.put_u16(key.len() as u16);
+        // Compute overlap between the first key and current key
+        let overlap_len = compute_overlap(self.first_key.as_key_slice(), key);
+        // Encode overlap key length.
+        self.data.put_u16(overlap_len as u16);
+        // Encode the rest (non-overlap) key length.
+        self.data.put_u16((key.len() - overlap_len) as u16);
         // Encode key content.
-        self.data.put(&mut key.raw_ref());
+        self.data.put(&key.raw_ref()[overlap_len..]);
 
         // Encode value length.
         self.data.put_u16(value.len() as u16);

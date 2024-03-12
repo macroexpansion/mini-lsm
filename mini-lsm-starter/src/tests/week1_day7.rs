@@ -64,7 +64,6 @@ fn test_task2_sst_decode() {
     assert_eq!(bloom_1.filter, bloom_2.filter);
 }
 
-#[ignore]
 #[test]
 fn test_task3_block_key_compression() {
     let mut builder = SsTableBuilder::new(128);
