@@ -462,7 +462,7 @@ impl LsmStorageInner {
             Arc::clone(&guard)
         }; // drop global lock here
 
-        let memtable_iters = self.create_membtable_iters(&snapshot, lower, upper)?;
+        let memtable_iters = self.create_memtable_iters(&snapshot, lower, upper)?;
         let memtable_iter = MergeIterator::create(memtable_iters);
 
         let l0_sstable_iters = self.create_l0_sstable_iters(&snapshot, lower, upper)?;
@@ -476,7 +476,7 @@ impl LsmStorageInner {
         )?))
     }
 
-    fn create_membtable_iters(
+    fn create_memtable_iters(
         &self,
         snapshot: &Arc<LsmStorageState>,
         lower: Bound<&[u8]>,
