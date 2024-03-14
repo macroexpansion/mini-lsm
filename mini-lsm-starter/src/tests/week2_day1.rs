@@ -153,7 +153,6 @@ fn generate_concat_sst(
     builder.build_for_test(path).unwrap()
 }
 
-#[ignore]
 #[test]
 fn test_task2_concat_iterator() {
     let dir = tempdir().unwrap();
