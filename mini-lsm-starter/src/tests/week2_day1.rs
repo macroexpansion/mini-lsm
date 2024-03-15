@@ -189,7 +189,6 @@ fn test_task2_concat_iterator() {
     assert_eq!(iter.key().for_testing_key_ref(), b"00010");
 }
 
-#[ignore]
 #[test]
 fn test_task3_integration() {
     let dir = tempdir().unwrap();

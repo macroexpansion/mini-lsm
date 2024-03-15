@@ -16,7 +16,9 @@ pub use simple_leveled::{
 };
 pub use tiered::{TieredCompactionController, TieredCompactionOptions, TieredCompactionTask};
 
+use crate::iterators::concat_iterator::SstConcatIterator;
 use crate::iterators::merge_iterator::MergeIterator;
+use crate::iterators::two_merge_iterator::TwoMergeIterator;
 use crate::iterators::StorageIterator;
 use crate::lsm_storage::{LsmStorageInner, LsmStorageState};
 use crate::table::{SsTable, SsTableBuilder, SsTableIterator};
@@ -121,15 +123,24 @@ impl LsmStorageInner {
                 Arc::clone(&guard)
             }; // drop global lock here
 
-            let mut sstable_iters = Vec::with_capacity(l0_sstables.len() + l1_sstables.len());
-            for sstable_id in l0_sstables.iter().chain(l1_sstables.iter()) {
+            let mut l0_sstable_iters = Vec::with_capacity(l0_sstables.len());
+            for sstable_id in l0_sstables.iter() {
                 let sstable = snapshot.sstables.get(sstable_id).unwrap().clone();
-                sstable_iters.push(Box::new(SsTableIterator::create_and_seek_to_first(
+                l0_sstable_iters.push(Box::new(SsTableIterator::create_and_seek_to_first(
                     sstable,
                 )?));
             }
 
-            let mut sstable_iter = MergeIterator::create(sstable_iters);
+            let mut l1_sstable_iters = Vec::with_capacity(l1_sstables.len());
+            for sstable_id in l1_sstables.iter() {
+                let sstable = snapshot.sstables.get(sstable_id).unwrap().clone();
+                l1_sstable_iters.push(sstable);
+            }
+
+            let mut sstable_iter = TwoMergeIterator::create(
+                MergeIterator::create(l0_sstable_iters),
+                SstConcatIterator::create_and_seek_to_first(l1_sstable_iters)?,
+            )?;
 
             // iterate over sstables, take the latest key-value pair and put it into new sstables
             // all newly created sstables has non-overlap key range
