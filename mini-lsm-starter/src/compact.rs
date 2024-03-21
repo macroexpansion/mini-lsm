@@ -247,6 +247,21 @@ impl LsmStorageInner {
             };
         }
 
+        if let CompactionTask::Tiered(TieredCompactionTask { tiers, .. }) = task {
+            let mut iters = Vec::with_capacity(tiers.len());
+            for (_, tier_sst_ids) in tiers {
+                let mut ssts = Vec::with_capacity(tier_sst_ids.len());
+                for id in tier_sst_ids.iter() {
+                    ssts.push(snapshot.sstables.get(id).unwrap().clone());
+                }
+                iters.push(Box::new(SstConcatIterator::create_and_seek_to_first(ssts)?));
+            }
+            return self.generate_new_sstable(
+                MergeIterator::create(iters),
+                task.compact_to_bottom_level(),
+            );
+        }
+
         todo!()
     }
 
