@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use serde::{Deserialize, Serialize};
 
 use crate::lsm_storage::LsmStorageState;
@@ -31,11 +33,32 @@ impl LeveledCompactionController {
 
     fn find_overlapping_ssts(
         &self,
-        _snapshot: &LsmStorageState,
-        _sst_ids: &[usize],
-        _in_level: usize,
+        snapshot: &LsmStorageState,
+        sst_ids: &[usize],
+        in_level: usize,
     ) -> Vec<usize> {
-        unimplemented!()
+        let begin_key = sst_ids
+            .iter()
+            .map(|id| snapshot.sstables[id].first_key())
+            .min()
+            .cloned()
+            .unwrap();
+        let end_key = sst_ids
+            .iter()
+            .map(|id| snapshot.sstables[id].last_key())
+            .max()
+            .cloned()
+            .unwrap();
+        let mut overlap_ssts = Vec::new();
+        for sst_id in &snapshot.levels[in_level - 1].1 {
+            let sst = &snapshot.sstables[sst_id];
+            let first_key = sst.first_key();
+            let last_key = sst.last_key();
+            if !(last_key < &begin_key || first_key > &end_key) {
+                overlap_ssts.push(*sst_id);
+            }
+        }
+        overlap_ssts
     }
 
     pub fn generate_compaction_task(
@@ -128,15 +151,80 @@ impl LeveledCompactionController {
                 is_lower_level_bottom_level: level + 1 == self.options.max_levels,
             });
         }
+
         None
     }
 
     pub fn apply_compaction_result(
         &self,
-        _snapshot: &LsmStorageState,
-        _task: &LeveledCompactionTask,
-        _output: &[usize],
+        snapshot: &LsmStorageState,
+        task: &LeveledCompactionTask,
+        output: &[usize],
     ) -> (LsmStorageState, Vec<usize>) {
-        unimplemented!()
+        let mut snapshot = snapshot.clone();
+        let mut files_to_remove = Vec::new();
+        let mut upper_level_sst_ids_set = task
+            .upper_level_sst_ids
+            .iter()
+            .copied()
+            .collect::<HashSet<_>>();
+        let mut lower_level_sst_ids_set = task
+            .lower_level_sst_ids
+            .iter()
+            .copied()
+            .collect::<HashSet<_>>();
+        if let Some(upper_level) = task.upper_level {
+            let new_upper_level_ssts = snapshot.levels[upper_level - 1]
+                .1
+                .iter()
+                .filter_map(|x| {
+                    if upper_level_sst_ids_set.remove(x) {
+                        return None;
+                    }
+                    Some(*x)
+                })
+                .collect::<Vec<_>>();
+            assert!(upper_level_sst_ids_set.is_empty());
+            snapshot.levels[upper_level - 1].1 = new_upper_level_ssts;
+        } else {
+            let new_l0_ssts = snapshot
+                .l0_sstables
+                .iter()
+                .filter_map(|x| {
+                    if upper_level_sst_ids_set.remove(x) {
+                        return None;
+                    }
+                    Some(*x)
+                })
+                .collect::<Vec<_>>();
+            assert!(upper_level_sst_ids_set.is_empty());
+            snapshot.l0_sstables = new_l0_ssts;
+        }
+
+        files_to_remove.extend(&task.upper_level_sst_ids);
+        files_to_remove.extend(&task.lower_level_sst_ids);
+
+        let mut new_lower_level_ssts = snapshot.levels[task.lower_level - 1]
+            .1
+            .iter()
+            .filter_map(|x| {
+                if lower_level_sst_ids_set.remove(x) {
+                    return None;
+                }
+                Some(*x)
+            })
+            .collect::<Vec<_>>();
+        assert!(lower_level_sst_ids_set.is_empty());
+        new_lower_level_ssts.extend(output);
+        new_lower_level_ssts.sort_by(|x, y| {
+            snapshot
+                .sstables
+                .get(x)
+                .unwrap()
+                .first_key()
+                .cmp(snapshot.sstables.get(y).unwrap().first_key())
+        });
+        snapshot.levels[task.lower_level - 1].1 = new_lower_level_ssts;
+        (snapshot, files_to_remove)
     }
 }
