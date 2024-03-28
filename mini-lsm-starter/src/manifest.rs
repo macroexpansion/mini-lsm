@@ -38,6 +38,8 @@ impl Manifest {
     }
 
     pub fn recover(path: impl AsRef<Path>) -> Result<(Self, Vec<ManifestRecord>)> {
+        println!("lsm.db path: {:?}", path.as_ref());
+
         let mut file = OpenOptions::new()
             .read(true)
             .append(true)
