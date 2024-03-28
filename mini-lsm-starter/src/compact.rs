@@ -22,6 +22,7 @@ use crate::iterators::two_merge_iterator::TwoMergeIterator;
 use crate::iterators::StorageIterator;
 use crate::key::KeySlice;
 use crate::lsm_storage::{LsmStorageInner, LsmStorageState};
+use crate::manifest::ManifestRecord;
 use crate::table::{SsTable, SsTableBuilder, SsTableIterator};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -289,7 +290,7 @@ impl LsmStorageInner {
         let mut ids = Vec::with_capacity(sstables.len());
 
         {
-            let _state_lock = self.state_lock.lock();
+            let state_lock = self.state_lock.lock();
             let mut state = self.state.read().as_ref().clone();
 
             // remove old sstables
@@ -321,12 +322,22 @@ impl LsmStorageInner {
 
             // update new state
             *self.state.write() = Arc::new(state);
+            // sync the file then write manifest
+            self.sync_dir()?;
+
+            if let Some(manifest) = self.manifest.as_ref() {
+                manifest.add_record(
+                    &state_lock,
+                    ManifestRecord::Compaction(compaction_task, ids.clone()),
+                )?;
+            }
         }
 
         // remove existing sst file
         for sst in l0_sstables.iter().chain(l1_sstables.iter()) {
             std::fs::remove_file(self.path_of_sst(*sst))?;
         }
+        self.sync_dir()?;
 
         println!("force full compaction done, new SSTs: {:?}", ids);
 
@@ -350,7 +361,7 @@ impl LsmStorageInner {
         let output = sstables.iter().map(|x| x.sst_id()).collect::<Vec<_>>();
 
         let ssts_to_remove = {
-            let _state_lock = self.state_lock.lock();
+            let state_lock = self.state_lock.lock();
             let mut snapshot = self.state.read().as_ref().clone();
 
             let mut new_sst_ids = Vec::new();
@@ -373,6 +384,15 @@ impl LsmStorageInner {
             let mut state = self.state.write();
             *state = Arc::new(snapshot);
             drop(state);
+            // sync the file then write manifest
+            self.sync_dir()?;
+
+            if let Some(manifest) = self.manifest.as_ref() {
+                manifest.add_record(
+                    &state_lock,
+                    ManifestRecord::Compaction(compaction_task, new_sst_ids),
+                )?;
+            }
 
             ssts_to_remove
         };
@@ -385,6 +405,7 @@ impl LsmStorageInner {
         for sst in ssts_to_remove {
             std::fs::remove_file(self.path_of_sst(sst.sst_id()))?;
         }
+        self.sync_dir()?;
 
         Ok(())
     }
